@@ -1,0 +1,6 @@
+yoloenv/
+.idea
+*.iml
+/output
+/input
+*.pyc

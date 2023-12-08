@@ -1,47 +1,87 @@
-import io
+import os
 
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, Response
-from pydantic import BaseModel, Field
-
-from app.Analyzer import Analyzer
-
-class TextAnalysisRequest(BaseModel):
-    text: str = Field(example="The cat ate the mouse. Then it slept.")
-    language: str = Field(example="en")
+from fastapi import FastAPI, File, UploadFile
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
+from ultralytics import YOLO
 
 app = FastAPI(
     title="YOLO Document Layout Analysis server",
-    version="0.0.1-SNAPSHOT"
+    version="0.0.1"
 )
 
-analyzer = Analyzer()
+model_path = 'models'
 
-@app.post("/analyze")
-async def analyze(imageFile: UploadFile = File(...)):
+text_block_model = YOLO(os.path.join(model_path, 'e50_aug.pt'))
+text_line_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-lines-1280.pt'))
+word_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-words-1280.pt'))
+glyph_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-glyphs-1280.pt'))
+
+@app.post("/analyze_blocks")
+async def analyze_blocks(imageFile: UploadFile = File(...)):
     original_image = Image.open(imageFile.file)
-    stacked_mask_image = analyzer.generate_stacked_mask(original_image)
+    try:
+        results = text_block_model(original_image, imgsz=640, conf=0.25, retina_masks=True)
+    except:
+        results = text_block_model(original_image, imgsz=640, conf=0.25, retina_masks=False)
 
-    # save image to an in-memory bytes buffer
-    with io.BytesIO() as buf:
-        stacked_mask_image.save(buf, format='PNG')
-        im_bytes = buf.getvalue()
+    response = result_to_response(results)
 
-    headers = {'Content-Disposition': 'inline; filename="masks.png"'}
-    return Response(im_bytes, headers=headers, media_type='image/png')
+    return JSONResponse(content=jsonable_encoder(response))
 
-@app.post("/display")
-async def display(imageFile: UploadFile = File(...)):
+@app.post("/analyze_lines")
+async def analyze_lines(imageFile: UploadFile = File(...)):
     original_image = Image.open(imageFile.file)
-    pretty_image = analyzer.generate_pretty_image(original_image)
 
-    # save image to an in-memory bytes buffer
-    with io.BytesIO() as buf:
-        pretty_image.save(buf, format='PNG')
-        im_bytes = buf.getvalue()
+    results = text_line_model(original_image, imgsz=1280, conf=0.25)
 
-    headers = {'Content-Disposition': 'inline; filename="image_with_masks.png"'}
-    return Response(im_bytes, headers=headers, media_type='image/png')
+    response = result_to_response(results)
+
+    return JSONResponse(content=jsonable_encoder(response))
+
+@app.post("/analyze_words")
+async def analyze_words(imageFile: UploadFile = File(...)):
+    original_image = Image.open(imageFile.file)
+
+    results = word_model(original_image, imgsz=1280, conf=0.25, max_det=1500)
+
+    response = result_to_response(results)
+
+    return JSONResponse(content=jsonable_encoder(response))
+
+
+@app.post("/analyze_glyphs")
+async def analyze_glyphs(imageFile: UploadFile = File(...)):
+    original_image = Image.open(imageFile.file)
+
+    results = glyph_model(original_image, imgsz=1280, conf=0.25, max_det=6000)
+
+    response = result_to_response(results)
+
+    return JSONResponse(content=jsonable_encoder(response))
+
+
+def result_to_response(results):
+    result = results[0]
+    boxes = result.boxes.xywhn.numpy()
+    classes = result.boxes.cls.numpy()
+    confidences = result.boxes.conf.numpy()
+
+    response = []
+    for i in range(len(classes)):
+        box = boxes[i].tolist()
+        box = list(map(lambda x: round(x, 4), box))
+        clazz = classes[i]
+        class_name = text_block_model.names[clazz]
+        confidence = round(confidences[i].item(), 4)
+        response.append({
+            "box": box,
+            "class": class_name,
+            "conf": confidence
+        })
+
+    return response
 
 if __name__ == "__main__":
     import uvicorn

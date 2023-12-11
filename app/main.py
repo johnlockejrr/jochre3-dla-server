@@ -64,17 +64,17 @@ async def analyze_glyphs(imageFile: UploadFile = File(...)):
 
 def result_to_response(results):
     result = results[0]
-    boxes = result.boxes.xywhn.numpy()
+    boxes = result.boxes.xywh.numpy()
     classes = result.boxes.cls.numpy()
     confidences = result.boxes.conf.numpy()
 
     response = []
     for i in range(len(classes)):
         box = boxes[i].tolist()
-        box = list(map(lambda x: round(x, 4), box))
+        box = list(map(lambda x: round(x), box))
         clazz = classes[i]
         class_name = text_block_model.names[clazz]
-        confidence = round(confidences[i].item(), 4)
+        confidence = round(confidences[i].item(), 2)
         response.append({
             "box": box,
             "class": class_name,

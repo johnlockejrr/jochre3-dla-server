@@ -1,14 +1,15 @@
 import os
+from typing import Annotated, Union
 
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Query, File, UploadFile
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
 from ultralytics import YOLO
 
 app = FastAPI(
     title="YOLO Document Layout Analysis server",
-    version="0.0.1"
+    version="0.0.2"
 )
 
 model_path = 'models'
@@ -18,44 +19,93 @@ text_line_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-lines-12
 word_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-words-1280.pt'))
 glyph_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-glyphs-1280.pt'))
 
-@app.post("/analyze_blocks")
-async def analyze_blocks(imageFile: UploadFile = File(...)):
+@app.post("/analyze-blocks")
+async def analyze_blocks(
+    min_confidence: Annotated[Union[float, None], Query(alias="min-confidence")] = None,
+    max_items: Annotated[Union[int, None], Query(alias="max-items")] = None,
+    imageFile: UploadFile = File(...)
+):
     original_image = Image.open(imageFile.file)
+
+    confidence = 0.25
+    if (min_confidence):
+        confidence = min_confidence
+
+    max_items_to_predict = 300
+    if (max_items):
+        max_items_to_predict = max_items
+
     try:
-        results = text_block_model(original_image, imgsz=640, conf=0.25, retina_masks=True)
+        results = text_block_model(original_image, imgsz=640, conf=confidence, retina_masks=True, max_det=max_items_to_predict)
     except:
-        results = text_block_model(original_image, imgsz=640, conf=0.25, retina_masks=False)
+        results = text_block_model(original_image, imgsz=640, conf=confidence, retina_masks=False, max_det=max_items_to_predict)
 
     response = result_to_response(results)
 
     return JSONResponse(content=jsonable_encoder(response))
 
-@app.post("/analyze_lines")
-async def analyze_lines(imageFile: UploadFile = File(...)):
+@app.post("/analyze-lines")
+async def analyze_lines(
+    min_confidence: Annotated[Union[float, None], Query(alias="min-confidence")] = None,
+    max_items: Annotated[Union[int, None], Query(alias="max-items")] = None,
+    imageFile: UploadFile = File(...)
+):
     original_image = Image.open(imageFile.file)
 
-    results = text_line_model(original_image, imgsz=1280, conf=0.25)
+    confidence = 0.25
+    if (min_confidence):
+        confidence = min_confidence
+
+    max_items_to_predict = 300
+    if (max_items):
+        max_items_to_predict = max_items
+
+    results = text_line_model(original_image, imgsz=1280, conf=confidence, max_det=max_items_to_predict)
 
     response = result_to_response(results)
 
     return JSONResponse(content=jsonable_encoder(response))
 
-@app.post("/analyze_words")
-async def analyze_words(imageFile: UploadFile = File(...)):
+@app.post("/analyze-words")
+async def analyze_words(
+    min_confidence: Annotated[Union[float, None], Query(alias="min-confidence")] = None,
+    max_items: Annotated[Union[int, None], Query(alias="max-items")] = None,
+    imageFile: UploadFile = File(...)
+):
     original_image = Image.open(imageFile.file)
 
-    results = word_model(original_image, imgsz=1280, conf=0.25, max_det=1500)
+    confidence = 0.25
+    if (min_confidence):
+        confidence = min_confidence
+
+    max_items_to_predict = 1500
+    if (max_items):
+        max_items_to_predict = max_items
+
+    results = word_model(original_image, imgsz=1280, conf=confidence, max_det=max_items_to_predict)
 
     response = result_to_response(results)
 
     return JSONResponse(content=jsonable_encoder(response))
 
 
-@app.post("/analyze_glyphs")
-async def analyze_glyphs(imageFile: UploadFile = File(...)):
+@app.post("/analyze-glyphs")
+async def analyze_glyphs(
+    min_confidence: Annotated[Union[float, None], Query(alias="min-confidence")] = None,
+    max_items: Annotated[Union[int, None], Query(alias="max-items")] = None,
+    imageFile: UploadFile = File(...)
+):
     original_image = Image.open(imageFile.file)
 
-    results = glyph_model(original_image, imgsz=1280, conf=0.25, max_det=6000)
+    confidence = 0.25
+    if (min_confidence):
+        confidence = min_confidence
+
+    max_items_to_predict = 6000
+    if (max_items):
+        max_items_to_predict = max_items
+
+    results = glyph_model(original_image, imgsz=1280, conf=confidence, max_det=max_items_to_predict)
 
     response = result_to_response(results)
 

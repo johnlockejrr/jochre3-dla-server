@@ -1,47 +1,137 @@
-import io
+import os
+from typing import Annotated, Union
 
 from PIL import Image
-from fastapi import FastAPI, File, UploadFile, Response
-from pydantic import BaseModel, Field
-
-from app.Analyzer import Analyzer
-
-class TextAnalysisRequest(BaseModel):
-    text: str = Field(example="The cat ate the mouse. Then it slept.")
-    language: str = Field(example="en")
+from fastapi import FastAPI, Query, File, UploadFile
+from fastapi.encoders import jsonable_encoder
+from fastapi.responses import JSONResponse
+from ultralytics import YOLO
 
 app = FastAPI(
     title="YOLO Document Layout Analysis server",
-    version="0.0.1-SNAPSHOT"
+    version="0.0.2"
 )
 
-analyzer = Analyzer()
+model_path = 'models'
 
-@app.post("/analyze")
-async def analyze(imageFile: UploadFile = File(...)):
+text_block_model = YOLO(os.path.join(model_path, 'e50_aug.pt'))
+text_line_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-lines-1280.pt'))
+word_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-words-1280.pt'))
+glyph_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-glyphs-1280.pt'))
+
+@app.post("/analyze-blocks")
+async def analyze_blocks(
+    min_confidence: Annotated[Union[float, None], Query(alias="min-confidence")] = None,
+    max_items: Annotated[Union[int, None], Query(alias="max-items")] = None,
+    imageFile: UploadFile = File(...)
+):
     original_image = Image.open(imageFile.file)
-    stacked_mask_image = analyzer.generate_stacked_mask(original_image)
 
-    # save image to an in-memory bytes buffer
-    with io.BytesIO() as buf:
-        stacked_mask_image.save(buf, format='PNG')
-        im_bytes = buf.getvalue()
+    confidence = 0.25
+    if (min_confidence):
+        confidence = min_confidence
 
-    headers = {'Content-Disposition': 'inline; filename="masks.png"'}
-    return Response(im_bytes, headers=headers, media_type='image/png')
+    max_items_to_predict = 300
+    if (max_items):
+        max_items_to_predict = max_items
 
-@app.post("/display")
-async def display(imageFile: UploadFile = File(...)):
+    try:
+        results = text_block_model(original_image, imgsz=640, conf=confidence, retina_masks=True, max_det=max_items_to_predict)
+    except:
+        results = text_block_model(original_image, imgsz=640, conf=confidence, retina_masks=False, max_det=max_items_to_predict)
+
+    response = result_to_response(results)
+
+    return JSONResponse(content=jsonable_encoder(response))
+
+@app.post("/analyze-lines")
+async def analyze_lines(
+    min_confidence: Annotated[Union[float, None], Query(alias="min-confidence")] = None,
+    max_items: Annotated[Union[int, None], Query(alias="max-items")] = None,
+    imageFile: UploadFile = File(...)
+):
     original_image = Image.open(imageFile.file)
-    pretty_image = analyzer.generate_pretty_image(original_image)
 
-    # save image to an in-memory bytes buffer
-    with io.BytesIO() as buf:
-        pretty_image.save(buf, format='PNG')
-        im_bytes = buf.getvalue()
+    confidence = 0.25
+    if (min_confidence):
+        confidence = min_confidence
 
-    headers = {'Content-Disposition': 'inline; filename="image_with_masks.png"'}
-    return Response(im_bytes, headers=headers, media_type='image/png')
+    max_items_to_predict = 300
+    if (max_items):
+        max_items_to_predict = max_items
+
+    results = text_line_model(original_image, imgsz=1280, conf=confidence, max_det=max_items_to_predict)
+
+    response = result_to_response(results)
+
+    return JSONResponse(content=jsonable_encoder(response))
+
+@app.post("/analyze-words")
+async def analyze_words(
+    min_confidence: Annotated[Union[float, None], Query(alias="min-confidence")] = None,
+    max_items: Annotated[Union[int, None], Query(alias="max-items")] = None,
+    imageFile: UploadFile = File(...)
+):
+    original_image = Image.open(imageFile.file)
+
+    confidence = 0.25
+    if (min_confidence):
+        confidence = min_confidence
+
+    max_items_to_predict = 1500
+    if (max_items):
+        max_items_to_predict = max_items
+
+    results = word_model(original_image, imgsz=1280, conf=confidence, max_det=max_items_to_predict)
+
+    response = result_to_response(results)
+
+    return JSONResponse(content=jsonable_encoder(response))
+
+
+@app.post("/analyze-glyphs")
+async def analyze_glyphs(
+    min_confidence: Annotated[Union[float, None], Query(alias="min-confidence")] = None,
+    max_items: Annotated[Union[int, None], Query(alias="max-items")] = None,
+    imageFile: UploadFile = File(...)
+):
+    original_image = Image.open(imageFile.file)
+
+    confidence = 0.25
+    if (min_confidence):
+        confidence = min_confidence
+
+    max_items_to_predict = 6000
+    if (max_items):
+        max_items_to_predict = max_items
+
+    results = glyph_model(original_image, imgsz=1280, conf=confidence, max_det=max_items_to_predict)
+
+    response = result_to_response(results)
+
+    return JSONResponse(content=jsonable_encoder(response))
+
+
+def result_to_response(results):
+    result = results[0]
+    boxes = result.boxes.xywh.numpy()
+    classes = result.boxes.cls.numpy()
+    confidences = result.boxes.conf.numpy()
+
+    response = []
+    for i in range(len(classes)):
+        box = boxes[i].tolist()
+        box = list(map(lambda x: round(x), box))
+        clazz = classes[i]
+        class_name = text_block_model.names[clazz]
+        confidence = round(confidences[i].item(), 2)
+        response.append({
+            "box": box,
+            "class": class_name,
+            "conf": confidence
+        })
+
+    return response
 
 if __name__ == "__main__":
     import uvicorn

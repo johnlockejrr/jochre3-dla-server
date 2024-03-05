@@ -1,14 +1,16 @@
 # YOLO Document Layout Analysis Server
 
-This server is adapted from: https://huggingface.co/spaces/qoobeeshy/yolo-document-layout-analysis
+This server provides endpoints to detect:
+* Blocks (text blocks and images)
+* Text lines
+* Words
+* Glyphs
 
-It uses a model fine-tuned for a Bengali document corpus to recognize four classes:
-* Paragraph
-* Text box
-* Image
-* Table
+Each detection is independent - it's up to the client software to combine them.
 
-Since the paragraph and text box masks can overlap the image and table masks, there are two models, one for the former and one for the later.
+Only block detection provides two different classes, "TopLevelTextBlock" and "Illustration".
+
+Behind-the-scenes, all models were constructed using [YOLOv8](https://docs.ultralytics.com/).
 
 ## Running locally
 

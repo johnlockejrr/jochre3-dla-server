@@ -21,6 +21,8 @@ glyph_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-glyphs-tiled
 glyph_model_simple = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-glyphs-tiled-1280.pt'))
 
 glyph_image_size = 1280
+# Strangely, blocks predict better at 640 although trained at 1280! (discovered by mistake)
+block_image_size = 640
 
 @app.post("/analyze-blocks")
 async def analyze_blocks(
@@ -39,9 +41,9 @@ async def analyze_blocks(
         max_items_to_predict = max_items
 
     try:
-        results = text_block_model(original_image, imgsz=1280, conf=confidence, retina_masks=True, max_det=max_items_to_predict)
+        results = text_block_model(original_image, imgsz=block_image_size, conf=confidence, retina_masks=True, max_det=max_items_to_predict)
     except:
-        results = text_block_model(original_image, imgsz=1280, conf=confidence, retina_masks=False, max_det=max_items_to_predict)
+        results = text_block_model(original_image, imgsz=block_image_size, conf=confidence, retina_masks=False, max_det=max_items_to_predict)
 
     response = result_to_response(results)
 

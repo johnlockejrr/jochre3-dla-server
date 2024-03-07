@@ -39,9 +39,9 @@ async def analyze_blocks(
         max_items_to_predict = max_items
 
     try:
-        results = text_block_model(original_image, imgsz=640, conf=confidence, retina_masks=True, max_det=max_items_to_predict)
+        results = text_block_model(original_image, imgsz=1280, conf=confidence, retina_masks=True, max_det=max_items_to_predict)
     except:
-        results = text_block_model(original_image, imgsz=640, conf=confidence, retina_masks=False, max_det=max_items_to_predict)
+        results = text_block_model(original_image, imgsz=1280, conf=confidence, retina_masks=False, max_det=max_items_to_predict)
 
     response = result_to_response(results)
 

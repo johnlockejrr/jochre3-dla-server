@@ -17,23 +17,40 @@ model_path = 'models'
 glyph_image_size = 1280
 # Strangely, blocks predict better at 640 although trained at 1280! (discovered by mistake)
 block_image_size = 640
-#block_image_size = 1280
 
 word_to_glyph_image_size = 128
 
 class Models(object):
     def __init__(self):
-        self._text_block_model = None
+        self._block_model_small = None
+        self._block_model_nano = None
+        self._text_block_model_small = None
+        self._text_block_model_nano = None
         self._text_line_model = None
         self._word_model = None
         self._glyph_model = None
         self._glyph_model_simple = None
         self._word_to_glyph_model = None
 
-    def get_text_block_model(self):
-        if self._text_block_model is None:
-            self._text_block_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-blocks-1280.pt'))
-        return self._text_block_model
+    def get_block_model(self, model_size: int):
+        if (model_size <= 0):
+            if self._block_model_nano is None:
+                self._block_model_nano = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-blocks-1280.pt'))
+            return self._block_model_nano
+        else:
+            if self._block_model_small is None:
+                self._block_model_small = YOLO(os.path.join(model_path, 'yolov8s-yiddish-detect-blocks-1280.pt'))
+            return self._block_model_small
+
+    def get_text_block_model(self, model_size: int):
+        if (model_size <= 0):
+            if self._text_block_model_nano is None:
+                self._text_block_model_nano = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-textblocks-1280.pt'))
+            return self._text_block_model_nano
+        else:
+            if self._text_block_model_small is None:
+                self._text_block_model_small = YOLO(os.path.join(model_path, 'yolov8s-yiddish-detect-textblocks-1280.pt'))
+            return self._text_block_model_small
 
     def get_text_line_model(self):
         if self._text_line_model is None:
@@ -66,6 +83,7 @@ models = Models()
 async def analyze_blocks(
     min_confidence: Annotated[Union[float, None], Query(alias="min-confidence")] = None,
     max_items: Annotated[Union[int, None], Query(alias="max-items")] = None,
+    model_size: Annotated[Union[int, None], Query(alias="model-complexity", description="Model size, 0 for nano or 1 for small. Default is 1.")] = None,
     imageFile: UploadFile = File(...)
 ):
     original_image = Image.open(imageFile.file)
@@ -78,7 +96,44 @@ async def analyze_blocks(
     if (max_items):
         max_items_to_predict = max_items
 
-    text_block_model = models.get_text_block_model()
+    block_model_size = 1
+    if (model_size):
+        block_model_size = model_size
+
+    block_model = models.get_block_model(block_model_size)
+
+    try:
+        results = block_model(original_image, imgsz=block_image_size, conf=confidence, retina_masks=True, max_det=max_items_to_predict)
+    except:
+        results = block_model(original_image, imgsz=block_image_size, conf=confidence, retina_masks=False, max_det=max_items_to_predict)
+
+    response = result_to_response(results, block_model)
+
+    return JSONResponse(content=jsonable_encoder(response))
+
+@app.post("/analyze-text-blocks")
+async def analyze_text_blocks(
+        min_confidence: Annotated[Union[float, None], Query(alias="min-confidence")] = None,
+        max_items: Annotated[Union[int, None], Query(alias="max-items")] = None,
+        model_size: Annotated[Union[int, None], Query(alias="model-complexity", description="Model size, 0 for nano or 1 for small. Default is 0.")] = None,
+        imageFile: UploadFile = File(...)
+):
+    original_image = Image.open(imageFile.file)
+
+    confidence = 0.25
+    if (min_confidence):
+        confidence = min_confidence
+
+    max_items_to_predict = 300
+    if (max_items):
+        max_items_to_predict = max_items
+
+    text_block_model_size = 0
+    if (model_size):
+        text_block_model_size = model_size
+
+    text_block_model = models.get_text_block_model(text_block_model_size)
+
     try:
         results = text_block_model(original_image, imgsz=block_image_size, conf=confidence, retina_masks=True, max_det=max_items_to_predict)
     except:

@@ -14,18 +14,76 @@ app = FastAPI(
 
 model_path = 'models'
 
-text_block_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-blocks-1280.pt'))
-text_line_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-lines-1280.pt'))
-word_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-words-1280.pt'))
-glyph_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-glyphs-tiled-1280-tsvey-yudn.pt'))
-glyph_model_simple = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-glyphs-tiled-1280.pt'))
-
 glyph_image_size = 1280
+# Strangely, blocks predict better at 640 although trained at 1280! (discovered by mistake)
+block_image_size = 640
+
+word_to_glyph_image_size = 128
+
+class Models(object):
+    def __init__(self):
+        self._block_model_small = None
+        self._block_model_nano = None
+        self._text_block_model_small = None
+        self._text_block_model_nano = None
+        self._text_line_model = None
+        self._word_model = None
+        self._glyph_model = None
+        self._glyph_model_simple = None
+        self._word_to_glyph_model = None
+
+    def get_block_model(self, model_size: int):
+        if (model_size <= 0):
+            if self._block_model_nano is None:
+                self._block_model_nano = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-blocks-1280.pt'))
+            return self._block_model_nano
+        else:
+            if self._block_model_small is None:
+                self._block_model_small = YOLO(os.path.join(model_path, 'yolov8s-yiddish-detect-blocks-1280.pt'))
+            return self._block_model_small
+
+    def get_text_block_model(self, model_size: int):
+        if (model_size <= 0):
+            if self._text_block_model_nano is None:
+                self._text_block_model_nano = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-textblocks-1280.pt'))
+            return self._text_block_model_nano
+        else:
+            if self._text_block_model_small is None:
+                self._text_block_model_small = YOLO(os.path.join(model_path, 'yolov8s-yiddish-detect-textblocks-1280.pt'))
+            return self._text_block_model_small
+
+    def get_text_line_model(self):
+        if self._text_line_model is None:
+            self._text_line_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-lines-1280.pt'))
+        return self._text_line_model
+
+    def get_word_model(self):
+        if self._word_model is None:
+            self._word_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-words-1280.pt'))
+        return self._word_model
+
+    def get_glyph_model(self):
+        if self._glyph_model is None:
+            self._glyph_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-glyphs-tiled-1280-pasekh-tsvey-yudn.pt'))
+        return self._glyph_model
+
+    def get_glyph_model_simple(self):
+        if self._glyph_model_simple is None:
+            self._glyph_model_simple = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-glyphs-tiled-1280.pt'))
+        return self._glyph_model_simple
+
+    def get_word_to_glyph_model(self):
+        if self._word_to_glyph_model is None:
+            self._word_to_glyph_model = YOLO(os.path.join(model_path, 'yolov8n-yiddish-detect-word-to-glyph.pt'))
+        return self._word_to_glyph_model
+
+models = Models()
 
 @app.post("/analyze-blocks")
 async def analyze_blocks(
     min_confidence: Annotated[Union[float, None], Query(alias="min-confidence")] = None,
     max_items: Annotated[Union[int, None], Query(alias="max-items")] = None,
+    model_size: Annotated[Union[int, None], Query(alias="model-complexity", description="Model size, 0 for nano or 1 for small. Default is 1.")] = None,
     imageFile: UploadFile = File(...)
 ):
     original_image = Image.open(imageFile.file)
@@ -38,12 +96,50 @@ async def analyze_blocks(
     if (max_items):
         max_items_to_predict = max_items
 
-    try:
-        results = text_block_model(original_image, imgsz=640, conf=confidence, retina_masks=True, max_det=max_items_to_predict)
-    except:
-        results = text_block_model(original_image, imgsz=640, conf=confidence, retina_masks=False, max_det=max_items_to_predict)
+    block_model_size = 1
+    if (model_size):
+        block_model_size = model_size
 
-    response = result_to_response(results)
+    block_model = models.get_block_model(block_model_size)
+
+    try:
+        results = block_model(original_image, imgsz=block_image_size, conf=confidence, retina_masks=True, max_det=max_items_to_predict)
+    except:
+        results = block_model(original_image, imgsz=block_image_size, conf=confidence, retina_masks=False, max_det=max_items_to_predict)
+
+    response = result_to_response(results, block_model)
+
+    return JSONResponse(content=jsonable_encoder(response))
+
+@app.post("/analyze-text-blocks")
+async def analyze_text_blocks(
+        min_confidence: Annotated[Union[float, None], Query(alias="min-confidence")] = None,
+        max_items: Annotated[Union[int, None], Query(alias="max-items")] = None,
+        model_size: Annotated[Union[int, None], Query(alias="model-complexity", description="Model size, 0 for nano or 1 for small. Default is 0.")] = None,
+        imageFile: UploadFile = File(...)
+):
+    original_image = Image.open(imageFile.file)
+
+    confidence = 0.25
+    if (min_confidence):
+        confidence = min_confidence
+
+    max_items_to_predict = 300
+    if (max_items):
+        max_items_to_predict = max_items
+
+    text_block_model_size = 0
+    if (model_size):
+        text_block_model_size = model_size
+
+    text_block_model = models.get_text_block_model(text_block_model_size)
+
+    try:
+        results = text_block_model(original_image, imgsz=block_image_size, conf=confidence, retina_masks=True, max_det=max_items_to_predict)
+    except:
+        results = text_block_model(original_image, imgsz=block_image_size, conf=confidence, retina_masks=False, max_det=max_items_to_predict)
+
+    response = result_to_response(results, text_block_model)
 
     return JSONResponse(content=jsonable_encoder(response))
 
@@ -63,9 +159,10 @@ async def analyze_lines(
     if (max_items):
         max_items_to_predict = max_items
 
+    text_line_model = models.get_text_line_model()
     results = text_line_model(original_image, imgsz=1280, conf=confidence, max_det=max_items_to_predict)
 
-    response = result_to_response(results)
+    response = result_to_response(results, text_line_model)
 
     return JSONResponse(content=jsonable_encoder(response))
 
@@ -85,9 +182,10 @@ async def analyze_words(
     if (max_items):
         max_items_to_predict = max_items
 
+    word_model = models.get_word_model()
     results = word_model(original_image, imgsz=1280, conf=confidence, max_det=max_items_to_predict)
 
-    response = result_to_response(results)
+    response = result_to_response(results, word_model)
 
     return JSONResponse(content=jsonable_encoder(response))
 
@@ -108,9 +206,10 @@ async def analyze_glyphs(
     if (max_items):
         max_items_to_predict = max_items
 
+    glyph_model = models.get_glyph_model()
     results = glyph_model(original_image, imgsz=glyph_image_size, conf=confidence, max_det=max_items_to_predict)
 
-    response = result_to_response(results)
+    response = result_to_response(results, glyph_model)
 
     return JSONResponse(content=jsonable_encoder(response))
 
@@ -123,21 +222,47 @@ async def analyze_glyphs_simple(
     original_image = Image.open(imageFile.file)
 
     confidence = 0.25
-    if (min_confidence):
+    if min_confidence is not None:
         confidence = min_confidence
 
     max_items_to_predict = 6000
-    if (max_items):
+    if max_items is not None:
         max_items_to_predict = max_items
+
+    glyph_model_simple = models.get_glyph_model_simple()
 
     results = glyph_model_simple(original_image, imgsz=glyph_image_size, conf=confidence, max_det=max_items_to_predict)
 
-    response = result_to_response(results)
+    response = result_to_response(results, glyph_model_simple)
+
+    return JSONResponse(content=jsonable_encoder(response))
+
+@app.post("/word-to-glyph")
+async def word_to_glyph(
+        min_confidence: Annotated[Union[float, None], Query(alias="min-confidence")] = None,
+        max_items: Annotated[Union[int, None], Query(alias="max-items")] = None,
+        imageFile: UploadFile = File(...)
+):
+    original_image = Image.open(imageFile.file)
+
+    confidence = 0.25
+    if min_confidence is not None:
+        confidence = min_confidence
+
+    max_items_to_predict = 100
+    if max_items is not None:
+        max_items_to_predict = max_items
+
+    word_to_glyph_model = models.get_word_to_glyph_model()
+
+    results = word_to_glyph_model(original_image, imgsz=word_to_glyph_image_size, conf=confidence, max_det=max_items_to_predict)
+
+    response = result_to_response(results, word_to_glyph_model)
 
     return JSONResponse(content=jsonable_encoder(response))
 
 
-def result_to_response(results):
+def result_to_response(results, model):
     result = results[0]
     boxes = result.boxes.xywh.numpy()
     classes = result.boxes.cls.numpy()
@@ -148,7 +273,7 @@ def result_to_response(results):
         box = boxes[i].tolist()
         box = list(map(lambda x: round(x), box))
         clazz = classes[i]
-        class_name = text_block_model.names[clazz]
+        class_name = model.names[clazz]
         confidence = round(confidences[i].item(), 2)
         response.append({
             "box": box,
